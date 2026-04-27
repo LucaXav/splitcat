@@ -1,0 +1,10 @@
+[Unit]
+Description=Run splitcat-update every 5 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Unit=splitcat-update.service
+
+[Install]
+WantedBy=timers.target

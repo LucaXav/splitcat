@@ -1,0 +1,43 @@
+# env
+.env
+.env.local
+.env.*.local
+
+# node
+node_modules/
+.next/
+out/
+dist/
+build/
+*.tsbuildinfo
+.pnpm-store/
+
+# python (just in case)
+__pycache__/
+*.pyc
+.venv/
+
+# logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# editors
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# n8n local dev data (not workflow exports — those we track)
+n8n/.n8n/
+n8n/data/
+
+# docker volumes
+deploy/volumes/
+
+# vercel
+.vercel
+
+# turbo
+.turbo

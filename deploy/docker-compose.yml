@@ -1,0 +1,76 @@
+version: "3.9"
+
+# SplitCat VPS stack
+# ------------------
+# Bot (Node) + Postgres + Caddy (TLS).
+# Designed for a small VPS — Hetzner CX11 (1 vCPU, 2GB) is enough.
+#
+#   cp deploy/.env.example deploy/.env && nano deploy/.env
+#   docker compose -f deploy/docker-compose.yml --env-file deploy/.env up -d --build
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - ./volumes/postgres:/var/lib/postgresql/data
+      - ../db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [internal]
+
+  bot:
+    build:
+      context: ../bot
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      TIMEZONE: ${TIMEZONE:-Asia/Singapore}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET}
+      PUBLIC_URL: ${PUBLIC_URL}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      MINI_APP_URL: ${MINI_APP_URL}
+      MINI_APP_SECRET: ${MINI_APP_SECRET}
+      EXCHANGERATE_API_KEY: ${EXCHANGERATE_API_KEY}
+      NUDGE_CHECK_CRON: ${NUDGE_CHECK_CRON:-0 */6 * * *}
+      CLAUDE_VISION_MODEL: ${CLAUDE_VISION_MODEL:-claude-opus-4-7}
+      CLAUDE_MEME_MODEL: ${CLAUDE_MEME_MODEL:-claude-haiku-4-5-20251001}
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks: [internal, web]
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      PUBLIC_HOST: ${PUBLIC_HOST}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./volumes/caddy/data:/data
+      - ./volumes/caddy/config:/config
+    networks: [web]
+
+networks:
+  internal:
+  web:

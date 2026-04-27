@@ -1,0 +1,11 @@
+[Unit]
+Description=SplitCat auto-update (git pull + docker compose pull + up)
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/splitcat
+ExecStart=/usr/bin/git pull --ff-only
+ExecStart=/usr/bin/docker compose -f deploy/docker-compose.yml --env-file deploy/.env build bot
+ExecStart=/usr/bin/docker compose -f deploy/docker-compose.yml --env-file deploy/.env up -d

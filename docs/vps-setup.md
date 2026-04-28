@@ -45,12 +45,22 @@ Fill in:
 |---|---|
 | `PUBLIC_HOST` | The domain you set up (e.g. `splitcat.yourdomain.com`) |
 | `PUBLIC_URL` | `https://` + the same domain |
-| `POSTGRES_PASSWORD` | `openssl rand -hex 16` |
+| `DATABASE_URL` | Neon Postgres connection string. Sign up at [neon.tech](https://neon.tech), create a project, copy the pooled connection string from "Connection Details" |
 | `TELEGRAM_BOT_TOKEN` | From [@BotFather](https://t.me/BotFather) |
 | `TELEGRAM_WEBHOOK_SECRET` | `openssl rand -hex 32` |
 | `ANTHROPIC_API_KEY` | From [console.anthropic.com](https://console.anthropic.com) |
 | `MINI_APP_URL` | Leave blank for now; fill in after Vercel deploy |
 | `MINI_APP_SECRET` | `openssl rand -hex 32` (must match Vercel's value) |
+
+### Apply the schema to Neon
+
+The Neon database starts empty. Apply the schema once from any machine that can reach Neon (your laptop or the VPS):
+
+```bash
+psql "$DATABASE_URL" < db/schema.sql
+```
+
+Re-run only when `db/schema.sql` changes — the file is idempotent enough for fresh databases but not for migrations on existing data.
 
 ## 6. Run the bootstrap script
 
@@ -110,14 +120,13 @@ journalctl -u splitcat-update.service -f
 
 ### Backups
 
-Database state lives in `/opt/splitcat/deploy/volumes/postgres/`. Daily backup:
+Neon takes care of point-in-time recovery for you (7 days on the free tier). For an off-site logical dump, run from any machine that can reach Neon:
 
 ```bash
 cat > /etc/cron.daily/splitcat-backup <<'EOF'
 #!/bin/bash
-cd /opt/splitcat
-docker compose -f deploy/docker-compose.yml exec -T postgres \
-  pg_dump -U splitcat splitcat | gzip > /var/backups/splitcat-$(date +%F).sql.gz
+source /opt/splitcat/deploy/.env
+pg_dump "$DATABASE_URL" | gzip > /var/backups/splitcat-$(date +%F).sql.gz
 find /var/backups -name 'splitcat-*.sql.gz' -mtime +14 -delete
 EOF
 chmod +x /etc/cron.daily/splitcat-backup
@@ -128,15 +137,13 @@ For off-site, pipe to `aws s3 cp` or `rclone` to your storage of choice.
 ### Restore
 
 ```bash
-gunzip < /var/backups/splitcat-2026-04-15.sql.gz | \
-  docker compose -f deploy/docker-compose.yml exec -T postgres \
-  psql -U splitcat splitcat
+gunzip < /var/backups/splitcat-2026-04-15.sql.gz | psql "$DATABASE_URL"
 ```
 
 ### Scaling
 
 This stack handles a few hundred active users comfortably. Past that:
 
-- Move Postgres to managed (Neon, Supabase) — both free tiers handle SplitCat-scale fine.
-- Run two bot instances behind Caddy with `WEBHOOK_PROVIDED_TOKEN` rotation, sharing the same Postgres.
+- Neon scales transparently — bump the compute size in the Neon dashboard if you outgrow the free tier.
+- Run two bot instances behind Caddy with `WEBHOOK_PROVIDED_TOKEN` rotation, sharing the same Neon database.
 - The nudge scheduler can stay on one instance — partition by `group_id % N` if you ever need multiple workers.

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { db, sql } from "@/lib/db";
 import type { AssignmentPayload } from "@/lib/types";
 
 /**
@@ -35,68 +35,51 @@ export async function POST(
     return NextResponse.json({ error: "no assignments" }, { status: 400 });
   }
 
-  const client = await db.connect();
-  try {
-    await client.query("BEGIN");
+  // Wipe previous assignments on this receipt — user is re-submitting.
+  const stmts = [
+    sql`DELETE FROM line_item_assignments
+         WHERE line_item_id IN (SELECT id FROM line_items WHERE receipt_id = ${receiptId})`,
+    sql`DELETE FROM receipt_payers WHERE receipt_id = ${receiptId}`
+  ];
 
-    // Wipe previous assignments on this receipt — user is re-submitting.
-    await client.query(
-      `DELETE FROM line_item_assignments
-        WHERE line_item_id IN (SELECT id FROM line_items WHERE receipt_id = $1)`,
-      [receiptId]
-    );
-    await client.query(`DELETE FROM receipt_payers WHERE receipt_id = $1`, [
-      receiptId
-    ]);
-
-    // Re-insert assignments as equal-share rows (share = 1 each, division
-    // happens at query time in the balances view).
-    for (const a of body.assignments) {
-      for (const uid of a.user_ids) {
-        await client.query(
-          `INSERT INTO line_item_assignments (line_item_id, user_id, share)
-           VALUES ($1, $2, 1)
-           ON CONFLICT (line_item_id, user_id) DO UPDATE SET share = 1`,
-          [a.line_item_id, uid]
-        );
-      }
+  // Re-insert assignments as equal-share rows (share = 1 each, division
+  // happens at query time in the balances view).
+  for (const a of body.assignments) {
+    for (const uid of a.user_ids) {
+      stmts.push(sql`
+        INSERT INTO line_item_assignments (line_item_id, user_id, share)
+        VALUES (${a.line_item_id}, ${uid}, 1)
+        ON CONFLICT (line_item_id, user_id) DO UPDATE SET share = 1
+      `);
     }
-
-    for (const p of body.payers) {
-      await client.query(
-        `INSERT INTO receipt_payers (receipt_id, user_id, amount_paid)
-         VALUES ($1, $2, $3)`,
-        [receiptId, p.user_id, p.amount_paid]
-      );
-    }
-
-    await client.query(
-      `UPDATE receipts SET status = 'assigned' WHERE id = $1`,
-      [receiptId]
-    );
-
-    // Create nudge rows for each debtor (everyone except the payer).
-    await client.query(
-      `INSERT INTO nudges (receipt_id, debtor_user_id, count)
-       SELECT DISTINCT $1, lia.user_id, 0
-         FROM line_item_assignments lia
-         JOIN line_items li ON li.id = lia.line_item_id
-        WHERE li.receipt_id = $1
-          AND lia.user_id NOT IN (SELECT user_id FROM receipt_payers WHERE receipt_id = $1)
-       ON CONFLICT DO NOTHING`,
-      [receiptId]
-    );
-
-    // Consume the session so the link can't be replayed.
-    await client.query(`DELETE FROM mini_app_sessions WHERE token = $1`, [token]);
-
-    await client.query("COMMIT");
-  } catch (e) {
-    await client.query("ROLLBACK");
-    throw e;
-  } finally {
-    client.release();
   }
+
+  for (const p of body.payers) {
+    stmts.push(sql`
+      INSERT INTO receipt_payers (receipt_id, user_id, amount_paid)
+      VALUES (${receiptId}, ${p.user_id}, ${p.amount_paid})
+    `);
+  }
+
+  stmts.push(
+    sql`UPDATE receipts SET status = 'assigned' WHERE id = ${receiptId}`
+  );
+
+  // Create nudge rows for each debtor (everyone except the payer).
+  stmts.push(sql`
+    INSERT INTO nudges (receipt_id, debtor_user_id, count)
+    SELECT DISTINCT ${receiptId}::uuid, lia.user_id, 0
+      FROM line_item_assignments lia
+      JOIN line_items li ON li.id = lia.line_item_id
+     WHERE li.receipt_id = ${receiptId}
+       AND lia.user_id NOT IN (SELECT user_id FROM receipt_payers WHERE receipt_id = ${receiptId})
+    ON CONFLICT DO NOTHING
+  `);
+
+  // Consume the session so the link can't be replayed.
+  stmts.push(sql`DELETE FROM mini_app_sessions WHERE token = ${token}`);
+
+  await sql.transaction(stmts);
 
   return NextResponse.json({ ok: true });
 }

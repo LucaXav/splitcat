@@ -71,6 +71,12 @@ async function loadReceipt(receiptId: string): Promise<Receipt | null> {
   const r = rows[0];
   return {
     ...r,
+    receipt_date:
+      r.receipt_date == null
+        ? null
+        : r.receipt_date instanceof Date
+          ? r.receipt_date.toISOString().slice(0, 10)
+          : String(r.receipt_date),
     uploaded_by: Number(r.uploaded_by),
     subtotal: Number(r.subtotal),
     service_charge: Number(r.service_charge),

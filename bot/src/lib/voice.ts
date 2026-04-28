@@ -133,13 +133,6 @@ export const dontKnow = (botUsername: string) =>
     `🙀 Nope, lost me. Stuff I understand:\n• "@${botUsername} who owes who"\n• "@${botUsername} I paid Wei 15"\n• "@${botUsername} settle up"`
   ]);
 
-export const mentionEmpty = (botUsername: string) =>
-  pick([
-    `👋 You rang? Try "@${botUsername} who owes who" or "@${botUsername} I paid Priya 20".`,
-    `🐱 What. Try "@${botUsername} balance" or "@${botUsername} settle up".`,
-    `😼 Mention me with an actual question, weirdo. Try "@${botUsername} who owes who".`
-  ]);
-
 // ───────────────────────────────────────────────────────────
 // Misc
 // ───────────────────────────────────────────────────────────

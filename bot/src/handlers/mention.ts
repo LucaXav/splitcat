@@ -25,8 +25,10 @@ export async function handleMention(ctx: Context): Promise<void> {
   const mentionPattern = new RegExp(`@${me.username}\\b`, "gi");
   const cleanText = ctx.message.text.replace(mentionPattern, "").trim();
 
+  // No words after the @-mention — treat as a help request rather than
+  // making the user guess the command vocabulary.
   if (!cleanText) {
-    await ctx.reply(voice.mentionEmpty(me.username));
+    await handleHelp(ctx as any);
     return;
   }
 

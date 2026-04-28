@@ -18,20 +18,6 @@ export async function handlePhoto(ctx: Context): Promise<void> {
   const placeholder = await ctx.reply(voice.receiptParsing());
 
   try {
-    // Upsert group + member
-    await db.query(
-      `INSERT INTO groups (id, title) VALUES ($1, $2)
-         ON CONFLICT (id) DO UPDATE SET title = EXCLUDED.title`,
-      [ctx.chat.id, ctx.chat.type === "private" ? "DM" : (ctx.chat as any).title ?? "Group"]
-    );
-    await db.query(
-      `INSERT INTO members (group_id, user_id, username, display_name)
-       VALUES ($1, $2, $3, $4)
-       ON CONFLICT (group_id, user_id) DO UPDATE
-         SET username = EXCLUDED.username, display_name = EXCLUDED.display_name`,
-      [ctx.chat.id, ctx.from.id, ctx.from.username ?? null, ctx.from.first_name ?? "User"]
-    );
-
     // Fetch group's home currency
     const { rows: gRows } = await db.query<{ home_currency: string }>(
       `SELECT home_currency FROM groups WHERE id = $1`,

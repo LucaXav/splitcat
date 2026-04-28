@@ -15,8 +15,54 @@ import {
 import { handleCallback } from "./handlers/callbacks.js";
 import { handleMention, handleReplyTrigger } from "./handlers/mention.js";
 import { startScheduler } from "./services/scheduler.js";
+import { upsertMember } from "./lib/members.js";
 
 const bot = new Bot(env.TELEGRAM_BOT_TOKEN);
+
+// Passive member tracking. Runs before every handler so anyone who sends a
+// message — even one not directed at the bot — is upserted into the members
+// table. Telegram doesn't expose a "list group members" API to bots, so this
+// is how we passively learn who's in the chat.
+bot.use(async (ctx, next) => {
+  if (ctx.from && ctx.chat && !ctx.from.is_bot) {
+    try {
+      await upsertMember(ctx);
+    } catch (e) {
+      log.warn({ err: String(e), user: ctx.from.id, chat: ctx.chat.id }, "passive upsert failed");
+    }
+  }
+  await next();
+});
+
+// Service messages: someone (or the bot itself) gets added to a group.
+bot.on("message:new_chat_members", async (ctx) => {
+  for (const u of ctx.message?.new_chat_members ?? []) {
+    if (u.is_bot) continue;
+    try {
+      await upsertMember(ctx, u);
+    } catch (e) {
+      log.warn({ err: String(e), user: u.id }, "new_chat_members upsert failed");
+    }
+  }
+});
+
+// chat_member updates: a member's role/status changed (joined, promoted, left).
+// Requires the bot to be admin OR Privacy Mode disabled, AND chat_member in
+// allowed_updates below. We upsert on any non-"left"/"kicked" status so that
+// promotions and joins refresh the row.
+bot.on("chat_member", async (ctx) => {
+  const update = ctx.chatMember;
+  if (!update) return;
+  const status = update.new_chat_member.status;
+  if (status === "left" || status === "kicked") return;
+  const u = update.new_chat_member.user;
+  if (u.is_bot) return;
+  try {
+    await upsertMember(ctx, u);
+  } catch (e) {
+    log.warn({ err: String(e), user: u.id, status }, "chat_member upsert failed");
+  }
+});
 
 // Commands
 bot.command("start", handleStart);
@@ -72,7 +118,7 @@ async function main(): Promise<void> {
 
   await bot.api.setWebhook(webhookUrl, {
     secret_token: env.TELEGRAM_WEBHOOK_SECRET,
-    allowed_updates: ["message", "callback_query"]
+    allowed_updates: ["message", "callback_query", "chat_member"]
   });
   log.info({ webhookUrl }, "Webhook registered with Telegram");
 

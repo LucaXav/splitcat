@@ -100,10 +100,18 @@ Include 1-3 cat-related emojis. Visual memes go in [brackets]. Keep under 3 sent
 export async function generateMeme(params: {
   level: number;
   display_name: string;
+  username: string | null;
   amount_home: number;
   home_currency: string;
   merchant: string | null;
 }): Promise<string> {
+  // Use the @-handle when available so Telegram delivers a real notification.
+  // Plain display name otherwise (still readable, just no push).
+  const addressTerm = params.username ? `@${params.username}` : params.display_name;
+  const tagInstruction = params.username
+    ? `Address them as "${addressTerm}" somewhere in the message — keep the @ on the username so Telegram pings them.`
+    : `Address them as "${addressTerm}" somewhere in the message.`;
+
   const response = await anthropic.messages.create({
     model: env.CLAUDE_MEME_MODEL,
     max_tokens: 300,
@@ -111,13 +119,13 @@ export async function generateMeme(params: {
     messages: [
       {
         role: "user",
-        content: `Nudge level ${params.level}. ${params.display_name} owes about ${params.amount_home.toFixed(2)} ${params.home_currency} from ${params.merchant ?? "a recent receipt"}. Write the message.`
+        content: `Nudge level ${params.level}. ${addressTerm} owes about ${params.amount_home.toFixed(2)} ${params.home_currency} from ${params.merchant ?? "a recent receipt"}. Write the message. ${tagInstruction}`
       }
     ]
   });
   const textBlock = response.content.find((b) => b.type === "text");
   if (!textBlock || textBlock.type !== "text") {
-    return `🐾 gentle reminder: there's an outstanding tab from ${params.merchant ?? "a recent meal"} 😺`;
+    return `🐾 ${addressTerm}, gentle reminder: there's an outstanding tab from ${params.merchant ?? "a recent meal"} 😺`;
   }
   return textBlock.text.trim();
 }

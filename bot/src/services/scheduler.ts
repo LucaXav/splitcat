@@ -15,6 +15,7 @@ type DueNudge = {
   fx_rate: string | null;
   home_currency: string;
   display_name: string;
+  username: string | null;
 };
 
 export function startScheduler(bot: Bot): void {
@@ -35,7 +36,8 @@ export async function runOnce(bot: Bot): Promise<void> {
       r.total::text,
       r.fx_rate::text,
       r.home_currency,
-      m.display_name
+      m.display_name,
+      m.username
     FROM nudges n
     JOIN receipts r ON r.id = n.receipt_id
     JOIN members m  ON m.group_id = r.group_id AND m.user_id = n.debtor_user_id
@@ -67,6 +69,7 @@ export async function runOnce(bot: Bot): Promise<void> {
       const text = await generateMeme({
         level: r.count + 1,
         display_name: r.display_name,
+        username: r.username,
         amount_home,
         home_currency: r.home_currency,
         merchant: r.merchant

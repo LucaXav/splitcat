@@ -30,6 +30,22 @@ export async function handleMention(ctx: Context): Promise<void> {
     return;
   }
 
+  await routeFreeformMessage(ctx, cleanText);
+}
+
+/**
+ * Triggered when a user replies to one of the bot's own messages. We treat
+ * this as a follow-up conversation and route the reply through the same
+ * intent parser as @-mentions, using the full text of the reply as-is.
+ */
+export async function handleReplyTrigger(ctx: Context): Promise<void> {
+  if (!ctx.message?.text || !ctx.from || !ctx.chat) return;
+  await routeFreeformMessage(ctx, ctx.message.text.trim());
+}
+
+async function routeFreeformMessage(ctx: Context, text: string): Promise<void> {
+  if (!ctx.from || !ctx.chat || !text) return;
+
   // Pull all known members in this group for Claude to disambiguate names
   const { rows: members } = await db.query<{
     user_id: string;
@@ -41,7 +57,7 @@ export async function handleMention(ctx: Context): Promise<void> {
   );
 
   const intent = await parseIntent({
-    text: cleanText,
+    text,
     speaker: {
       user_id: ctx.from.id,
       first_name: ctx.from.first_name ?? "",
@@ -54,7 +70,7 @@ export async function handleMention(ctx: Context): Promise<void> {
     }))
   });
 
-  log.info({ intent: intent.kind, text: cleanText, user: ctx.from.id }, "mention intent");
+  log.info({ intent: intent.kind, text, user: ctx.from.id }, "freeform intent");
 
   await dispatchIntent(ctx, intent);
 }

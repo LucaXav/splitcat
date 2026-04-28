@@ -13,7 +13,7 @@ import {
   handlePaid
 } from "./handlers/commands.js";
 import { handleCallback } from "./handlers/callbacks.js";
-import { handleMention } from "./handlers/mention.js";
+import { handleMention, handleReplyTrigger } from "./handlers/mention.js";
 import { startScheduler } from "./services/scheduler.js";
 
 const bot = new Bot(env.TELEGRAM_BOT_TOKEN);
@@ -43,6 +43,18 @@ bot.on(":text").filter(
     );
   },
   handleMention
+);
+
+// Replies to one of the bot's own messages — same intent parser as @-mentions.
+// Mention handler is registered first, so a reply that ALSO @-mentions the bot
+// is handled there and never reaches this filter.
+bot.on(":text").filter(
+  async (ctx) => {
+    if (!ctx.message?.text || !ctx.message.reply_to_message) return false;
+    const me = await ctx.api.getMe();
+    return ctx.message.reply_to_message.from?.id === me.id;
+  },
+  handleReplyTrigger
 );
 
 // Inline buttons

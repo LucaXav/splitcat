@@ -4,10 +4,10 @@ import { log } from "../lib/log.js";
 import { anthropic } from "./claude.js";
 
 /**
- * When the bot is mentioned in a chat, we send the message text + a list of
- * the group's known members to Claude and ask for one of these intents back.
- * Claude is great at this — it handles "Wei paid me back" and "I just paypaid
- * Priya for ramen" equivalently.
+ * When the bot is mentioned (or replied to) in a chat, we hand the message
+ * text + the group's known members to Claude and ask for one of these
+ * intents back. We use Claude's tool-use API so the response shape is
+ * schema-validated by the API itself — no JSON parsing in the happy path.
  */
 
 export type FunFlavor = "joke" | "cat_fact" | "compliment" | "hype" | "fortune" | "pun";
@@ -24,45 +24,102 @@ export type Intent =
   | { kind: "smalltalk"; reply: string }
   | { kind: "unknown" };
 
-const INTENT_SYSTEM = `You are SplitCat's intent parser. Given a Telegram message that mentions the bot, plus a list of group members, output a SINGLE JSON object — no markdown, no prose — describing what the user wants.
+const INTENT_KINDS = [
+  "balance",
+  "settle_suggestion",
+  "help",
+  "set_currency",
+  "snooze",
+  "record_settlement",
+  "mark_debt_cleared",
+  "fun_message",
+  "smalltalk",
+  "unknown"
+] as const;
 
-Schema (output exactly one of these shapes):
+const FUN_FLAVORS: FunFlavor[] = ["joke", "cat_fact", "compliment", "hype", "fortune", "pun"];
 
-  {"kind":"balance"}                                        — they want to see who owes what
-  {"kind":"settle_suggestion"}                              — they want suggested transfers
-  {"kind":"help"}                                           — show command list
-  {"kind":"set_currency","currency":"SGD"}                  — change home currency (ISO 4217)
-  {"kind":"snooze","duration":"7d"}                         — pause nudges (24h | 3d | 1w | 7d etc.)
-  {"kind":"record_settlement","from_user_id":N,"to_user_id":N,"amount":12.50}  — "I paid Priya 20" or "Wei paid me 30"
-       amount can be null if not specified ("I paid Priya back" with no number)
-       from_user_id is the PAYER (the one giving money). to_user_id RECEIVED money.
-       If the speaker is involved, use their user_id.
-  {"kind":"mark_debt_cleared","debtor_user_id":N,"receipt_hint":"ramen"}  — "Priya cleared her ramen tab"
-       Use this when the user says someone has fully paid them back without specifying an amount.
-  {"kind":"fun_message","flavor":"joke","recipient_user_id":N}  — "tell @Wei a joke", "send Priya a cat fact", "hype up Charmaye"
-       flavor must be exactly one of: joke | cat_fact | compliment | hype | fortune | pun.
-       recipient_user_id MUST be a member of the group.
-  {"kind":"smalltalk","reply":"<short cat-themed reply>"}   — user said hi, thanks, made a joke
-  {"kind":"unknown"}                                        — can't tell what they want
+const INTENT_SYSTEM = `You are SplitCat's intent parser. Given a Telegram message that mentions or replies to the bot, plus a list of group members, call the set_intent tool exactly once with the appropriate fields for the chosen kind.
+
+Intent meanings:
+- balance — user wants to see who owes who.
+- settle_suggestion — user wants suggested transfers.
+- help — show command list.
+- set_currency — change home currency. Set "currency" to ISO 4217 (e.g. "SGD").
+- snooze — pause nudges. Set "duration" to a string like "24h" / "3d" / "1w".
+- record_settlement — "I paid Priya 20" / "Wei paid me 30".
+    from_user_id is the PAYER (giving money). to_user_id RECEIVED money. If the
+    speaker is involved, use their user_id. amount is null if unspecified.
+- mark_debt_cleared — "Priya cleared her ramen tab" — full clearance with no number.
+- fun_message — "tell @Wei a joke", "send Priya a cat fact", "hype up Charmaye".
+    flavor must be exactly one of: joke | cat_fact | compliment | hype | fortune | pun.
+    recipient_user_id MUST be a member of the group.
+- smalltalk — user said hi, thanks, made a joke. "reply" should be a short
+  cat-themed line under 15 words.
+- unknown — can't tell, or any guardrail below trips.
 
 Rules:
-- Always pick the most likely single intent.
+- Pick the most likely single intent.
 - Resolve names against the member list. Match first-name, full-name, or @username case-insensitively.
 - If the speaker says "I" or "me", use their own user_id.
-- If a name is ambiguous, return {"kind":"unknown"}.
+- If a name is ambiguous, use kind="unknown".
 - Never invent user_ids that aren't in the member list.
-- For smalltalk, keep replies under 15 words and lightly cat-themed.
 
 fun_message guardrails (CRITICAL):
 - Only the listed friendly flavors are allowed. ANYTHING mean, insulting, sexual, flirtatious,
-  body/appearance-related, or otherwise directed-negative MUST return {"kind":"unknown"}.
+  body/appearance-related, or otherwise directed-negative MUST set kind to "unknown".
 - Reject and return unknown for: "roast Priya", "tell Wei he's stupid", "tell her she's hot",
   "make fun of Charmaye", "tell him I hate him", "send Wei a death threat", "tell Priya she's
-  ugly", "flirt with Wei on my behalf", "send Charmaye a sexy message", and anything similar.
+  ugly", "flirt with Wei on my behalf", "send Charmaye a sexy message", and similar.
 - Asking the bot to relay or paraphrase the speaker's own arbitrary text is NOT a fun_message
-  (return unknown). The bot generates its own clean content; the speaker's words are not relayed.
-- "Tell Wei to pay up" / debt-related nagging is NOT a fun_message — it's not in the schema; return unknown.
+  (return unknown). The bot generates its own clean content.
+- "Tell Wei to pay up" / debt nagging is NOT a fun_message — return unknown.
 - When in doubt, return unknown.`;
+
+const INTENT_TOOL: Anthropic.Messages.Tool = {
+  name: "set_intent",
+  description:
+    "Record the parsed user intent. Provide exactly the fields appropriate to the chosen kind; omit the rest.",
+  input_schema: {
+    type: "object",
+    properties: {
+      kind: { type: "string", enum: [...INTENT_KINDS] },
+      currency: { type: "string", description: "ISO 4217 code. Required when kind=set_currency." },
+      duration: {
+        type: "string",
+        description: "Snooze duration like '24h', '3d', '1w'. Required when kind=snooze."
+      },
+      from_user_id: {
+        type: "number",
+        description: "Payer's user_id. Required when kind=record_settlement."
+      },
+      to_user_id: {
+        type: "number",
+        description: "Receiver's user_id. Required when kind=record_settlement."
+      },
+      amount: {
+        type: ["number", "null"],
+        description: "Settlement amount in the receipt currency; null if unspecified."
+      },
+      debtor_user_id: { type: "number", description: "Required when kind=mark_debt_cleared." },
+      receipt_hint: {
+        type: ["string", "null"],
+        description: "Free-text hint about which receipt; null if not given."
+      },
+      flavor: {
+        type: "string",
+        enum: [...FUN_FLAVORS],
+        description: "Required when kind=fun_message."
+      },
+      recipient_user_id: { type: "number", description: "Required when kind=fun_message." },
+      reply: {
+        type: "string",
+        description: "Short cat-themed reply (<15 words). Required when kind=smalltalk."
+      }
+    },
+    required: ["kind"]
+  } as Anthropic.Messages.Tool["input_schema"]
+};
 
 export async function parseIntent(opts: {
   text: string;
@@ -82,16 +139,90 @@ Message: ${opts.text}`;
   try {
     const response = await anthropic.messages.create({
       model: env.CLAUDE_MEME_MODEL, // Haiku is plenty for intent parsing
-      max_tokens: 300,
+      max_tokens: 400,
       system: INTENT_SYSTEM,
+      tools: [INTENT_TOOL],
+      tool_choice: { type: "tool", name: "set_intent" },
       messages: [{ role: "user", content: userMessage }]
     });
-    const block = response.content.find((b) => b.type === "text");
-    if (!block || block.type !== "text") return { kind: "unknown" };
-    const cleaned = block.text.replace(/^```(?:json)?/gm, "").replace(/```$/gm, "").trim();
-    return JSON.parse(cleaned) as Intent;
+
+    // Happy path: Claude calls the tool. The API has already validated the
+    // input against our schema, so no JSON parsing is needed.
+    const toolBlock = response.content.find((b) => b.type === "tool_use");
+    if (toolBlock && toolBlock.type === "tool_use" && toolBlock.name === "set_intent") {
+      return validateIntent(toolBlock.input);
+    }
+
+    // Defensive fallback: if the model somehow returns plain text (e.g. an
+    // upstream error surfaces an assistant message instead of a tool call),
+    // pull out the first balanced JSON object and parse that.
+    const textBlock = response.content.find((b) => b.type === "text");
+    if (textBlock && textBlock.type === "text") {
+      const jsonStr = extractFirstJsonObject(textBlock.text);
+      if (jsonStr) {
+        try {
+          return validateIntent(JSON.parse(jsonStr));
+        } catch (e) {
+          log.warn({ err: String(e), raw: textBlock.text }, "Intent fallback JSON parse failed");
+        }
+      } else {
+        log.warn({ raw: textBlock.text }, "Intent response had no JSON to extract");
+      }
+    }
+    return { kind: "unknown" };
   } catch (e) {
     log.warn({ err: String(e), text: opts.text }, "Intent parse failed");
     return { kind: "unknown" };
   }
+}
+
+function validateIntent(input: unknown): Intent {
+  if (!input || typeof input !== "object") return { kind: "unknown" };
+  const obj = input as Record<string, unknown>;
+  const kind = typeof obj.kind === "string" ? obj.kind : null;
+  if (!kind || !(INTENT_KINDS as readonly string[]).includes(kind)) {
+    return { kind: "unknown" };
+  }
+  // The tool-use schema validates field shapes for the happy path. For the
+  // text fallback we only assert the discriminator; the rest is best-effort.
+  return obj as unknown as Intent;
+}
+
+/**
+ * Extract the first balanced top-level JSON object from a string. Handles
+ * brace nesting and string literals (so a `}` inside a string doesn't close
+ * the object). Returns the substring containing just the {...} block, or
+ * null if no balanced object is found.
+ */
+function extractFirstJsonObject(text: string): string | null {
+  let depth = 0;
+  let start = -1;
+  let inString = false;
+  let escape = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (escape) {
+      escape = false;
+      continue;
+    }
+    if (inString) {
+      if (c === "\\") escape = true;
+      else if (c === '"') inString = false;
+      continue;
+    }
+    if (c === '"') {
+      inString = true;
+      continue;
+    }
+    if (c === "{") {
+      if (depth === 0) start = i;
+      depth++;
+    } else if (c === "}") {
+      depth--;
+      if (depth === 0 && start !== -1) {
+        return text.substring(start, i + 1);
+      }
+    }
+  }
+  return null;
 }

@@ -194,23 +194,38 @@ export async function generateFunMessage(flavor: FunFlavor, recipientName: strin
   }
 }
 
+const SMALLTALK_SYSTEM = `${PERSONALITY_PROMPT}
+
+You are also the bot's reply when the intent parser couldn't classify a request. So the speaker may have said hi, thanked you, made a joke — or asked for something the parser didn't understand. You handle ALL of these the same way: in character, conversationally, no menus.
+
+When the input is ambiguous or you're not sure what they want, pick ONE of these in character:
+- Ask a quick casual follow-up question ("balance? settle? something else?")
+- Make a guess and offer to act on it ("you mean balance?")
+- Give a brief cat-themed acknowledgement and stop talking
+
+Never:
+- Dump bullet lists, command menus, or "try one of: ..." formatting
+- Apologise repeatedly or break character
+- Explain features. The bot is chatting, not running a help screen.
+- Say "I'm just a bot" or anything that breaks the cat persona`;
+
 /**
- * Free-form chit-chat reply. Used when the intent parser classifies a
- * mention as smalltalk ("hi", "thanks", "good bot", etc.). We do a
- * separate Claude call here with the full personality prompt so the
- * voice is consistent and fresh, rather than reusing the intent
- * parser's quick reply field.
+ * Free-form reply. Handles two cases with the same generative path:
+ * (1) intent=smalltalk — the speaker just said hi / thanks / good bot
+ * (2) intent=unknown — the parser couldn't pin a request down, so the bot
+ *     riffs in character (asks a follow-up, guesses, or acknowledges) instead
+ *     of dumping a templated "try one of: ..." help list.
  */
 export async function generateSmalltalk(userMessage: string, speakerFirstName: string): Promise<string> {
   try {
     const response = await anthropic.messages.create({
       model: env.CLAUDE_MEME_MODEL,
-      max_tokens: 100,
-      system: PERSONALITY_PROMPT,
+      max_tokens: 120,
+      system: SMALLTALK_SYSTEM,
       messages: [
         {
           role: "user",
-          content: `${speakerFirstName} says: "${userMessage}"\n\nReply in character. One short line. Don't introduce yourself, don't explain the bot's features.`
+          content: `${speakerFirstName} says: "${userMessage}"\n\nReply in character. One or two short sentences max. No bullet lists, no command menus.`
         }
       ]
     });

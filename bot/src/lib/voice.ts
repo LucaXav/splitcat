@@ -123,17 +123,6 @@ export const snoozed = (interval: string) =>
   ]);
 
 // ───────────────────────────────────────────────────────────
-// Unknown / fallback
-// ───────────────────────────────────────────────────────────
-
-export const dontKnow = (botUsername: string) =>
-  pick([
-    `🐱 I didn't catch that. Try:\n• "@${botUsername} who owes who"\n• "@${botUsername} I paid Priya 20"\n• "@${botUsername} settle up"`,
-    `😼 The cat tilts its head. Try one of:\n• "@${botUsername} balance"\n• "@${botUsername} I paid [name] [amount]"\n• "@${botUsername} [name] cleared their tab"`,
-    `🙀 Nope, lost me. Stuff I understand:\n• "@${botUsername} who owes who"\n• "@${botUsername} I paid Wei 15"\n• "@${botUsername} settle up"`
-  ]);
-
-// ───────────────────────────────────────────────────────────
 // Misc
 // ───────────────────────────────────────────────────────────
 

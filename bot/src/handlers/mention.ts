@@ -117,18 +117,16 @@ async function dispatchIntent(ctx: Context, intent: Intent): Promise<void> {
       await sendFunMessage(ctx, intent);
       return;
 
-    case "smalltalk": {
-      // Re-roll the reply with the personality prompt so it feels fresh,
-      // rather than using whatever Haiku generated inside the intent JSON.
-      const reply = await generateSmalltalk(ctx.message?.text ?? "", ctx.from.first_name ?? "you");
-      await ctx.reply(reply);
-      return;
-    }
-
+    case "smalltalk":
     case "unknown":
     default: {
-      const me = await ctx.api.getMe();
-      await ctx.reply(voice.dontKnow(me.username));
+      // Both branches ride the same generative reply path. For smalltalk we
+      // re-roll the cat voice fresh (instead of trusting the intent parser's
+      // tiny "reply" field). For unknown we let the bot chat back in
+      // character — ask a follow-up, guess, or acknowledge — rather than
+      // dumping a bullet-pointed help menu.
+      const reply = await generateSmalltalk(ctx.message?.text ?? "", ctx.from.first_name ?? "you");
+      await ctx.reply(reply);
       return;
     }
   }
@@ -262,8 +260,13 @@ async function sendFunMessage(
     [ctx.chat.id, intent.recipient_user_id]
   );
   if (!rows.length) {
-    const me = await ctx.api.getMe();
-    await ctx.reply(voice.dontKnow(me.username));
+    // Recipient resolved by the parser but no longer in the members table
+    // (race / deleted account). Don't dump a help screen — riff in character.
+    const reply = await generateSmalltalk(
+      ctx.message?.text ?? "",
+      ctx.from?.first_name ?? "you"
+    );
+    await ctx.reply(reply);
     return;
   }
   const recipient = rows[0]!;

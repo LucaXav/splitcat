@@ -2,7 +2,7 @@ import type { Context } from "grammy";
 import { db } from "../lib/db.js";
 import { log } from "../lib/log.js";
 import { parseIntent, type Intent } from "../services/intent.js";
-import { generateSmalltalk } from "../services/claude.js";
+import { generateSmalltalk, generateFunMessage } from "../services/claude.js";
 import * as voice from "../lib/voice.js";
 import {
   handleBalance,
@@ -111,6 +111,10 @@ async function dispatchIntent(ctx: Context, intent: Intent): Promise<void> {
 
     case "mark_debt_cleared":
       await markDebtCleared(ctx, intent);
+      return;
+
+    case "fun_message":
+      await sendFunMessage(ctx, intent);
       return;
 
     case "smalltalk": {
@@ -244,4 +248,37 @@ async function markDebtCleared(
   const debtorName = nameRows[0]?.display_name ?? "they";
 
   await ctx.reply(voice.debtCleared(debtorName, `${amount.toFixed(2)} ${ccy}`));
+}
+
+async function sendFunMessage(
+  ctx: Context,
+  intent: Extract<Intent, { kind: "fun_message" }>
+): Promise<void> {
+  if (!ctx.chat) return;
+
+  const { rows } = await db.query<{ display_name: string; username: string | null }>(
+    `SELECT display_name, username FROM members
+      WHERE group_id = $1 AND user_id = $2`,
+    [ctx.chat.id, intent.recipient_user_id]
+  );
+  if (!rows.length) {
+    const me = await ctx.api.getMe();
+    await ctx.reply(voice.dontKnow(me.username));
+    return;
+  }
+  const recipient = rows[0]!;
+
+  const body = await generateFunMessage(intent.flavor, recipient.display_name);
+
+  // Use HTML mode so we can safely escape Claude-generated text and embed a
+  // tg://user link for recipients without a public @username.
+  const tag = recipient.username
+    ? `@${recipient.username}`
+    : `<a href="tg://user?id=${intent.recipient_user_id}">${escapeHtml(recipient.display_name)}</a>`;
+
+  await ctx.reply(`${tag} ${escapeHtml(body)}`, { parse_mode: "HTML" });
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }

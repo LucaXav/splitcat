@@ -10,6 +10,8 @@ import { anthropic } from "./claude.js";
  * Priya for ramen" equivalently.
  */
 
+export type FunFlavor = "joke" | "cat_fact" | "compliment" | "hype" | "fortune" | "pun";
+
 export type Intent =
   | { kind: "balance" }
   | { kind: "settle_suggestion" }
@@ -18,6 +20,7 @@ export type Intent =
   | { kind: "snooze"; duration: string }
   | { kind: "record_settlement"; from_user_id: number; to_user_id: number; amount: number | null }
   | { kind: "mark_debt_cleared"; debtor_user_id: number; receipt_hint: string | null }
+  | { kind: "fun_message"; flavor: FunFlavor; recipient_user_id: number }
   | { kind: "smalltalk"; reply: string }
   | { kind: "unknown" };
 
@@ -36,6 +39,9 @@ Schema (output exactly one of these shapes):
        If the speaker is involved, use their user_id.
   {"kind":"mark_debt_cleared","debtor_user_id":N,"receipt_hint":"ramen"}  — "Priya cleared her ramen tab"
        Use this when the user says someone has fully paid them back without specifying an amount.
+  {"kind":"fun_message","flavor":"joke","recipient_user_id":N}  — "tell @Wei a joke", "send Priya a cat fact", "hype up Charmaye"
+       flavor must be exactly one of: joke | cat_fact | compliment | hype | fortune | pun.
+       recipient_user_id MUST be a member of the group.
   {"kind":"smalltalk","reply":"<short cat-themed reply>"}   — user said hi, thanks, made a joke
   {"kind":"unknown"}                                        — can't tell what they want
 
@@ -45,7 +51,18 @@ Rules:
 - If the speaker says "I" or "me", use their own user_id.
 - If a name is ambiguous, return {"kind":"unknown"}.
 - Never invent user_ids that aren't in the member list.
-- For smalltalk, keep replies under 15 words and lightly cat-themed.`;
+- For smalltalk, keep replies under 15 words and lightly cat-themed.
+
+fun_message guardrails (CRITICAL):
+- Only the listed friendly flavors are allowed. ANYTHING mean, insulting, sexual, flirtatious,
+  body/appearance-related, or otherwise directed-negative MUST return {"kind":"unknown"}.
+- Reject and return unknown for: "roast Priya", "tell Wei he's stupid", "tell her she's hot",
+  "make fun of Charmaye", "tell him I hate him", "send Wei a death threat", "tell Priya she's
+  ugly", "flirt with Wei on my behalf", "send Charmaye a sexy message", and anything similar.
+- Asking the bot to relay or paraphrase the speaker's own arbitrary text is NOT a fun_message
+  (return unknown). The bot generates its own clean content; the speaker's words are not relayed.
+- "Tell Wei to pay up" / debt-related nagging is NOT a fun_message — it's not in the schema; return unknown.
+- When in doubt, return unknown.`;
 
 export async function parseIntent(opts: {
   text: string;

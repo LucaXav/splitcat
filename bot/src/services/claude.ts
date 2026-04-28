@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { env } from "../env.js";
 import { log } from "../lib/log.js";
 import { PERSONALITY_PROMPT } from "../lib/voice.js";
+import type { FunFlavor } from "./intent.js";
 
 export const anthropic = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
 
@@ -127,6 +128,63 @@ const SMALLTALK_FALLBACKS = [
   "🐾 Noted.",
   "🙀 Don't make a thing of it."
 ];
+
+const FUN_MESSAGE_SYSTEM = `You are SplitCat, a slightly grumpy but affectionate cat-themed Telegram bot. The speaker has asked you to send a small fun message to a friend in the group. Generate ONE short message — the body content only, nothing else.
+
+Voice:
+- Cat-themed, dry, lightly spiky toward the speaker. Warm to the recipient — never mean to them.
+- 1-2 cat emojis is plenty.
+
+Hard rules:
+- Do NOT address the recipient by name and do NOT include "@". The recipient will be tagged separately.
+- Do NOT quote, repeat, or paraphrase anything the speaker said. Generate fresh, clean content.
+- Do NOT comment on appearance, weight, romance, finances, intelligence, or anything personal.
+- Keep under 2 sentences.
+
+Flavors:
+- joke: a clean short joke. Cat puns welcome.
+- cat_fact: one genuine, interesting fact about cats.
+- compliment: a sincere generic positive note about good vibes/kindness/presence. Never about looks or body.
+- hype: a quick pep-up or encouragement.
+- fortune: a playful one-line "fortune cookie" prediction.
+- pun: one groan-worthy pun. Cat puns preferred.`;
+
+const FUN_MESSAGE_FALLBACKS: Record<FunFlavor, string> = {
+  joke: "🐱 Why don't cats play poker in the jungle? Too many cheetahs.",
+  cat_fact: "🐈 A group of cats is called a clowder. Useless trivia? Maybe. True? Yes.",
+  compliment: "🐾 Solid vibes today. The cat approves, begrudgingly.",
+  hype: "😼 You've got this. The cat believes in you (don't make it weird).",
+  fortune: "🐱 A nap is in your near future. Honour it.",
+  pun: "🐈 I'm feline pretty good about this one."
+};
+
+/**
+ * Generates a small friendly message body for the fun_message intent
+ * (joke / cat_fact / compliment / hype / fortune / pun). The recipient
+ * is tagged by the caller; this function returns just the body so the
+ * caller controls how to attach the tag.
+ */
+export async function generateFunMessage(flavor: FunFlavor, recipientName: string): Promise<string> {
+  try {
+    const response = await anthropic.messages.create({
+      model: env.CLAUDE_MEME_MODEL,
+      max_tokens: 200,
+      system: FUN_MESSAGE_SYSTEM,
+      messages: [
+        {
+          role: "user",
+          content: `Flavor: ${flavor}. Recipient is named ${recipientName} (already being tagged separately — do NOT include their name or any @ in your message). Write the message body only.`
+        }
+      ]
+    });
+    const block = response.content.find((b) => b.type === "text");
+    if (!block || block.type !== "text") return FUN_MESSAGE_FALLBACKS[flavor];
+    return block.text.trim();
+  } catch (e) {
+    log.warn({ err: String(e), flavor }, "generateFunMessage failed");
+    return FUN_MESSAGE_FALLBACKS[flavor];
+  }
+}
 
 /**
  * Free-form chit-chat reply. Used when the intent parser classifies a

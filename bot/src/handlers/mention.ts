@@ -125,6 +125,11 @@ async function dispatchIntent(ctx: Context, intent: Intent): Promise<void> {
     case "smalltalk":
     case "unknown":
     default: {
+      // CRITICAL: smalltalk path MUST NOT trigger any database writes.
+      // If a user's message implies a financial action, the parser should
+      // classify it as record_settlement / mark_debt_cleared, NOT smalltalk.
+      // Smalltalk replies must NEVER claim to have taken actions.
+      //
       // Both branches ride the same generative reply path. For smalltalk we
       // re-roll the cat voice fresh (instead of trusting the intent parser's
       // tiny "reply" field). For unknown we let the bot chat back in

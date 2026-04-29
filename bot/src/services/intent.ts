@@ -49,10 +49,32 @@ Intent meanings:
 - help — show command list.
 - set_currency — change home currency. Set "currency" to ISO 4217 (e.g. "SGD").
 - snooze — pause nudges. Set "duration" to a string like "24h" / "3d" / "1w".
-- record_settlement — "I paid Priya 20" / "Wei paid me 30".
+- record_settlement — a payment WITH an explicit amount.
     from_user_id is the PAYER (giving money). to_user_id RECEIVED money. If the
     speaker is involved, use their user_id. amount is null if unspecified.
-- mark_debt_cleared — "Priya cleared her ramen tab" — full clearance with no number.
+    Examples that MUST classify as record_settlement:
+      • "I paid Priya 20"            → from=speaker, to=Priya, amount=20
+      • "Wei paid me 30"             → from=Wei, to=speaker, amount=30
+      • "Charmayne paid me 20"       → from=Charmayne, to=speaker, amount=20
+      • "I paid Wei 50"              → from=speaker, to=Wei, amount=50
+      • "I sent Priya 12.50"         → from=speaker, to=Priya, amount=12.5
+- mark_debt_cleared — a payment WITHOUT a specific amount; treat the debtor's
+    full outstanding balance as settled. The speaker is implicitly the creditor.
+    Examples that MUST classify as mark_debt_cleared:
+      • "Charmayne has paid"         → debtor=Charmayne
+      • "@charmayneyy has paid"      → debtor=Charmayne (resolve @-handle)
+      • "Wei paid me back"           → debtor=Wei
+      • "Charmayne settled up"       → debtor=Charmayne
+      • "Charmayne is square"        → debtor=Charmayne
+      • "Wei cleared his tab"        → debtor=Wei
+      • "done with Wei"              → debtor=Wei (speaker means Wei has paid)
+      • "Priya cleared her ramen tab"→ debtor=Priya, receipt_hint="ramen"
+      • "she has paid" / "he has paid" → resolve from group context if a clear
+        single candidate exists; otherwise unknown.
+    When the message implies a person has paid the speaker but you're torn
+    between unknown and mark_debt_cleared, PREFER mark_debt_cleared. False
+    positives are recoverable (the user can undo); silent false negatives
+    leave debts unsettled forever.
 - fun_message — "tell @Wei a joke", "send Priya a cat fact", "hype up Charmaye".
     flavor must be exactly one of: joke | cat_fact | compliment | hype | fortune | pun.
     recipient_user_id MUST be a member of the group.
@@ -120,17 +142,23 @@ const INTENT_TOOL: Anthropic.Messages.Tool = {
       },
       from_user_id: {
         type: "number",
-        description: "Payer's user_id. Required when kind=record_settlement."
+        description:
+          "Payer's user_id. Required when kind=record_settlement. The PAYER is the one giving money. Example: 'Charmayne paid me 20' → from=Charmayne; 'I paid Wei 50' → from=speaker."
       },
       to_user_id: {
         type: "number",
-        description: "Receiver's user_id. Required when kind=record_settlement."
+        description:
+          "Receiver's user_id. Required when kind=record_settlement. Example: 'Charmayne paid me 20' → to=speaker; 'I paid Wei 50' → to=Wei."
       },
       amount: {
         type: ["number", "null"],
         description: "Settlement amount in the receipt currency; null if unspecified."
       },
-      debtor_user_id: { type: "number", description: "Required when kind=mark_debt_cleared." },
+      debtor_user_id: {
+        type: "number",
+        description:
+          "The person who has paid back the speaker. Required when kind=mark_debt_cleared. Use this for phrasings like 'Charmayne has paid', '@charmayneyy has paid', 'Wei paid me back', 'Charmayne settled up', 'Wei cleared his tab', 'done with Wei', 'she/he has paid'. When ambiguous between unknown and mark_debt_cleared, prefer mark_debt_cleared."
+      },
       receipt_hint: {
         type: ["string", "null"],
         description: "Free-text hint about which receipt; null if not given."

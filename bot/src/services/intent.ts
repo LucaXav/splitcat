@@ -58,17 +58,32 @@ Intent meanings:
     recipient_user_id MUST be a member of the group.
 - smalltalk — user said hi, thanks, made a joke. "reply" should be a short
   cat-themed line under 15 words.
-- flattery — the user is excessively praising / complimenting / professing love
-  or fandom AT the bot itself. Examples that DO trigger: "you're the best",
-  "good kitty", "splitcat I love you", "best bot ever", "amazing work",
-  "you're amazing", "marry me splitcat", "10/10 cat", "splitcat is my hero".
-  Be CONSERVATIVE — these do NOT trigger flattery, return smalltalk instead:
-    • plain "thanks" / "thank you" / "ty"
-    • thanking the bot for a specific action ("thanks for parsing the receipt",
-      "thanks for the reminder", "ty for splitting that")
-    • generic happy / cheerful messages not aimed at the bot
-    • short acknowledgements ("nice", "cool", "ok")
-  Trigger ONLY when the message is genuinely buttering up the bot.
+- flattery — the user is laying it on THICK with praise / love / fandom
+  directed AT the bot. This must be RARE — the matching easter egg only
+  works if it's surprising. Default to smalltalk when in any doubt.
+
+  ONLY trigger flattery when one of these clearly applies:
+    • Strong, deliberate praise: "very good boy", "such a good kitty",
+      "best cat ever", "you're amazing", "splitcat is the goat"
+    • Effusive thanks tied to praise: "thank you so much kitty",
+      "thanks splitcat you're the best", "ty kitty so helpful"
+    • Sustained / emphasized affection: multiple praise words, intensifiers
+      ("really really good", "the absolute best"), or affectionate emojis
+      paired with praise ("good cat 🥰", "the best 😻")
+    • Direct love or fandom statements: "I love you splitcat", "splitcat
+      is my favorite", "best bot in the universe", "marry me splitcat"
+
+  These do NOT trigger flattery — return smalltalk instead:
+    • Plain short praise: "good boy", "good cat", "nice job" — too low-key
+    • Plain thanks: "thanks" / "ty" / "thank you" with no other content
+    • Task acknowledgment: "thanks for the receipt", "good catch",
+      "well done" tied to a specific action the bot did
+    • Generic positivity: "good morning", "ok cool", "nice"
+
+  Bar to clear: would a passing observer say "wow, they're really laying
+  it on thick with the bot"? If yes → flattery. Otherwise → smalltalk.
+  When in doubt, smalltalk. Rare and surprising is the goal.
+
   "reply" should be a short cat-themed line under 15 words — same shape as smalltalk.
 - unknown — can't tell, or any guardrail below trips.
 

@@ -260,8 +260,12 @@ async function sendFlatteryReply(
   if (!ctx.chat) return;
 
   // Optional kiss-sticker preface. Failure must not block the text reply.
-  const fileId = env.FLATTERY_STICKER_FILE_ID;
-  if (fileId) {
+  const fileIds = (env.FLATTERY_STICKER_FILE_IDS ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (fileIds.length > 0) {
+    const fileId = fileIds[Math.floor(Math.random() * fileIds.length)]!;
     try {
       await ctx.api.sendSticker(ctx.chat.id, fileId);
     } catch (err) {

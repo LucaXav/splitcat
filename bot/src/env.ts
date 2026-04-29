@@ -37,9 +37,10 @@ const schema = z.object({
   // random and posted just before the text nudge. Blank/missing → text only.
   NUDGE_STICKER_FILE_IDS: z.string().optional(),
 
-  // Optional: single Telegram sticker file_id sent before the bot's reply
-  // when the intent parser detects flattery aimed at the bot.
-  FLATTERY_STICKER_FILE_ID: z.string().optional()
+  // Optional: comma-separated Telegram sticker file_ids. One is picked at
+  // random and posted just before the bot's reply when the intent parser
+  // detects strong flattery aimed at the bot. Kept rare by design.
+  FLATTERY_STICKER_FILE_IDS: z.string().optional()
 });
 
 export const env = schema.parse(process.env);

@@ -39,10 +39,40 @@ Optimized for friend groups, dinners out, trips, and anything bill-splittable.
 
 ## Architecture
 
+```
+┌─────────────┐   webhook   ┌──────────────────┐
+│  Telegram   │ ──────────▶ │   Bot (Node)     │
+│             │ ◀── reply ──│   on the VPS     │
+└─────────────┘             └────────┬─────────┘
+                                     │
+                  ┌──────────────────┼─────────────────┐
+                  │                  │                 │
+                  ▼                  ▼                 ▼
+           ┌────────────┐     ┌────────────┐   ┌──────────────┐
+           │  Postgres  │     │   Claude   │   │  Mini App    │
+           │  (ledger)  │     │  vision +  │   │  (Vercel)    │
+           └────────────┘     │   memes    │   └──────────────┘
+                              └────────────┘
+```
+
+One bot process handles all interactions; Postgres holds shared state; Claude does parsing and memes; Mini App provides the assignment UI.
+
 - **Bot**: TypeScript, [grammY](https://grammy.dev) framework, Docker on a small VPS
 - **Mini App**: Next.js on Vercel
 - **Database**: Postgres (managed via [Neon](https://neon.tech))
 - **Cost**: ~$10/month at hobby scale
+
+## Repo layout
+
+```
+splitcat/
+├── bot/                    TypeScript bot — webhook server + scheduler
+├── mini-app/               Next.js Telegram Mini App for item assignment
+├── db/schema.sql           Postgres schema (shared between bot and Mini App)
+├── deploy/                 docker-compose, Caddy, systemd auto-update
+├── prompts/                Standalone Claude prompt version (no infra needed)
+└── docs/                   Setup guides
+```
 
 ## Self-hosting
 

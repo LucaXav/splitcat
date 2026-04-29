@@ -29,6 +29,7 @@ services:
       NUDGE_CHECK_CRON: ${NUDGE_CHECK_CRON:-0 */6 * * *}
       CLAUDE_VISION_MODEL: ${CLAUDE_VISION_MODEL:-claude-opus-4-7}
       CLAUDE_MEME_MODEL: ${CLAUDE_MEME_MODEL:-claude-haiku-4-5-20251001}
+      NUDGE_STICKER_FILE_IDS: ${NUDGE_STICKER_FILE_IDS:-}
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
       interval: 30s

@@ -75,6 +75,23 @@ export async function runOnce(bot: Bot): Promise<void> {
         merchant: r.merchant
       });
 
+      // Optional sticker preface. Failure must not block the text nudge.
+      const fileIds = (env.NUDGE_STICKER_FILE_IDS ?? "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (fileIds.length > 0) {
+        const fileId = fileIds[Math.floor(Math.random() * fileIds.length)]!;
+        try {
+          await bot.api.sendSticker(r.group_id, fileId);
+        } catch (err) {
+          log.warn(
+            { err: String(err), fileId },
+            "failed to send sticker, continuing with text"
+          );
+        }
+      }
+
       await bot.api.sendMessage(r.group_id, text, {
         reply_markup: {
           inline_keyboard: [

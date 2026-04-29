@@ -31,7 +31,11 @@ const schema = z.object({
   // Tuning
   NUDGE_CHECK_CRON: z.string().default("0 */6 * * *"), // every 6h
   CLAUDE_VISION_MODEL: z.string().default("claude-opus-4-7"),
-  CLAUDE_MEME_MODEL: z.string().default("claude-haiku-4-5-20251001")
+  CLAUDE_MEME_MODEL: z.string().default("claude-haiku-4-5-20251001"),
+
+  // Optional: comma-separated Telegram sticker file_ids. One is picked at
+  // random and posted just before the text nudge. Blank/missing → text only.
+  NUDGE_STICKER_FILE_IDS: z.string().optional()
 });
 
 export const env = schema.parse(process.env);

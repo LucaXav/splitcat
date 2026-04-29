@@ -67,8 +67,14 @@ export async function handleBalance(ctx: CommandContext<Context>): Promise<void>
     const name = r.display_name.padEnd(12);
     return `${tag} ${name} ${Math.abs(bal).toFixed(2)} ${ccy}`;
   });
+  const hasOpenBalances = rows.some((r) => Math.abs(Number(r.balance)) > 0.01);
   await ctx.reply(`${voice.balanceHeader()}\n\`\`\`\n${lines.join("\n")}\n\`\`\``, {
-    parse_mode: "Markdown"
+    parse_mode: "Markdown",
+    ...(hasOpenBalances && {
+      reply_markup: {
+        inline_keyboard: [[{ text: "🤝 Settle up", callback_data: "settle_up" }]]
+      }
+    })
   });
 }
 
@@ -99,7 +105,19 @@ export async function handleSettle(ctx: CommandContext<Context>): Promise<void> 
     transfers
       .map((t) => `💸 ${t.from.display_name} → ${t.to.display_name}: ${t.amount.toFixed(2)} ${ccy}`)
       .join("\n");
-  await ctx.reply(text, { parse_mode: "Markdown" });
+  // One row per suggested transfer. Tapping records the settlement directly,
+  // skipping the natural-language parse path. Callback data carries the full
+  // tuple so the handler can verify auth and write the settlement atomically.
+  const inline_keyboard = transfers.map((t) => [
+    {
+      text: `💰 ${t.from.display_name} → ${t.to.display_name} ${t.amount.toFixed(2)}`,
+      callback_data: `settle:${ctx.chat!.id}:${t.from.user_id}:${t.to.user_id}:${t.amount.toFixed(2)}`
+    }
+  ]);
+  await ctx.reply(text, {
+    parse_mode: "Markdown",
+    reply_markup: { inline_keyboard }
+  });
 }
 
 export async function handleCurrency(ctx: CommandContext<Context>): Promise<void> {

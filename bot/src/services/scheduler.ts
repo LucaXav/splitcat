@@ -95,7 +95,18 @@ export async function runOnce(bot: Bot): Promise<void> {
       await bot.api.sendMessage(r.group_id, text, {
         reply_markup: {
           inline_keyboard: [
-            [{ text: "✅ I've paid", callback_data: `mark_paid:${r.receipt_id}` }]
+            [
+              {
+                text: "✅ I've paid",
+                callback_data: `paid:${r.receipt_id}:${r.debtor_user_id}`
+              }
+            ],
+            [
+              {
+                text: "⏰ Snooze 24h",
+                callback_data: `snooze:${r.receipt_id}:${r.debtor_user_id}:24h`
+              }
+            ]
           ]
         }
       });

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db, sql } from "@/lib/db";
 import type { AssignmentPayload } from "@/lib/types";
+import { buildAssignedReceiptMessage } from "@/lib/receipt-summary";
 
 /**
  * We accept the token via header (since it was signed into the URL the user
@@ -115,31 +116,46 @@ export async function POST(
 
   await sql.transaction(stmts);
 
-  // Tell the bot to edit its original parsed-receipt message so the inline
-  // "Assign items" button is replaced with a summary of who owes what.
-  // Best-effort — failures here mustn't fail the user's save.
-  await notifyBotReceiptAssigned(receiptId).catch((e) => {
-    console.warn("notifyBot failed", String(e));
+  // Edit the bot's original parsed-receipt message in Telegram so the inline
+  // "Assign items" button is replaced with a per-person summary. Best-effort —
+  // any failure here is logged but never fails the user's save.
+  await editTelegramMessageForReceipt(receiptId).catch((e) => {
+    console.warn("telegram edit failed", String(e));
   });
 
   return NextResponse.json({ ok: true });
 }
 
-async function notifyBotReceiptAssigned(receiptId: string): Promise<void> {
-  const baseUrl = process.env.BOT_INTERNAL_URL;
-  const secret =
-    process.env.INTERNAL_API_SECRET ?? process.env.MINI_APP_SECRET;
-  if (!baseUrl || !secret) return;
-  const url = `${baseUrl.replace(/\/$/, "")}/internal/receipt-assigned`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Internal-Secret": secret
-    },
-    body: JSON.stringify({ receipt_id: receiptId })
-  });
+/**
+ * Calls Telegram's editMessageText for the receipt's stored chat/message IDs.
+ * Skips silently if the receipt pre-dates the chat_id/message_id columns or
+ * if TELEGRAM_BOT_TOKEN is not configured. Never throws past the caller's
+ * try/catch — we don't want the user's save to look failed because we
+ * couldn't update a chat message.
+ */
+async function editTelegramMessageForReceipt(receiptId: string): Promise<void> {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) {
+    console.warn("TELEGRAM_BOT_TOKEN not set — skipping message edit");
+    return;
+  }
+  const summary = await buildAssignedReceiptMessage(receiptId);
+  if (!summary) return;
+  const res = await fetch(
+    `https://api.telegram.org/bot${token}/editMessageText`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: summary.chat_id,
+        message_id: summary.message_id,
+        text: summary.text,
+        parse_mode: "HTML",
+        reply_markup: { inline_keyboard: [] }
+      })
+    }
+  );
   if (!res.ok) {
-    throw new Error(`bot returned ${res.status}: ${await res.text()}`);
+    throw new Error(`telegram returned ${res.status}: ${await res.text()}`);
   }
 }

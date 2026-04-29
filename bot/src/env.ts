@@ -20,6 +20,10 @@ const schema = z.object({
   // Mini App
   MINI_APP_URL: z.string().url(),
   MINI_APP_SECRET: z.string().min(32),
+  // Shared secret the Mini App uses to call the bot's /internal/* endpoints.
+  // Falls back to MINI_APP_SECRET when unset so existing deployments keep
+  // working without a separate env var.
+  INTERNAL_API_SECRET: z.string().min(16).optional(),
 
   // Optional FX
   EXCHANGERATE_API_KEY: z.string().optional(),

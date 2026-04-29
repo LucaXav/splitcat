@@ -41,6 +41,10 @@ CREATE TABLE receipts (
   fx_source       TEXT,                             -- 'user', 'claude-estimate', 'exchangerate-api', etc.
   home_currency   TEXT NOT NULL,                    -- copied from group at time of entry
   photo_file_id   TEXT,                             -- Telegram file_id for re-fetching
+  -- The bot's parsed-receipt reply, kept so the Mini App can edit it once the
+  -- user finishes the split (replacing the inline keyboard with a summary).
+  chat_id         BIGINT,
+  message_id      BIGINT,
   raw_ocr         JSONB,                            -- full Claude response
   status          TEXT NOT NULL DEFAULT 'pending_assignment',
                   -- pending_assignment | assigned | settled | voided
@@ -168,3 +172,13 @@ SELECT
     AS balance
 FROM members m
 LEFT JOIN payments p ON p.group_id = m.group_id AND p.user_id = m.user_id;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Idempotent migrations for live deployments. New columns get added here so
+-- `npm run migrate` (which just re-applies this file) picks them up without
+-- failing on the existing CREATE TABLEs above.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+ALTER TABLE receipts
+  ADD COLUMN IF NOT EXISTS chat_id    BIGINT,
+  ADD COLUMN IF NOT EXISTS message_id BIGINT;

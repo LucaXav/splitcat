@@ -2,6 +2,7 @@ import type { Context } from "grammy";
 import { db } from "../lib/db.js";
 import { log } from "../lib/log.js";
 import { suggestSettlements } from "../lib/split.js";
+import { buildAssignedReceiptMessage } from "../lib/receipt-summary.js";
 import * as voice from "../lib/voice.js";
 
 export async function handleCallback(ctx: Context): Promise<void> {
@@ -101,6 +102,25 @@ async function splitEqually(ctx: Context, receiptId: string): Promise<void> {
   }
 
   await ctx.answerCallbackQuery({ text: "Split equally ✓" });
+
+  // Edit the original receipt message to reflect the completed split, mirroring
+  // the behaviour after a Mini App save. Best-effort: if the edit fails (e.g.
+  // an older receipt without chat_id/message_id), fall back to a fresh reply.
+  const summary = await buildAssignedReceiptMessage(receiptId);
+  if (summary) {
+    try {
+      await ctx.api.editMessageText(
+        summary.chat_id,
+        summary.message_id,
+        summary.text,
+        { parse_mode: "Markdown", reply_markup: { inline_keyboard: [] } }
+      );
+      return;
+    } catch (e) {
+      log.warn({ err: String(e), receiptId }, "split_equal edit failed; replying instead");
+    }
+  }
+
   await ctx.reply(
     `🐾 Split equally among everyone. ${ctx.from.first_name} paid. Use /balance to see the running tab.`
   );

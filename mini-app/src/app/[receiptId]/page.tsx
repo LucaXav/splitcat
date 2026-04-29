@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
 import { verifySession } from "@/lib/auth";
 import AssignmentUI from "@/components/AssignmentUI";
+import SplitSummary from "@/components/SplitSummary";
 import type { Receipt } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -27,13 +28,26 @@ export default async function ReceiptPage({
   const receipt = await loadReceipt(receiptId);
   if (!receipt) notFound();
 
+  // Defense-in-depth: if the receipt has already been assigned (e.g. someone
+  // taps a stale Mini App link after the bot's "Split equally" path or after
+  // a previous save), show the read-only summary instead of letting them
+  // re-assign and clobber the existing split.
+  const alreadyAssigned =
+    receipt.status === "assigned" ||
+    receipt.status === "settled" ||
+    receipt.line_items.some((li) => li.assignments.length > 0);
+
   return (
     <main className="min-h-screen p-4 pb-32">
-      <AssignmentUI
-        receipt={receipt}
-        sessionToken={t}
-        currentUserId={session.user_id}
-      />
+      {alreadyAssigned ? (
+        <SplitSummary receipt={receipt} />
+      ) : (
+        <AssignmentUI
+          receipt={receipt}
+          sessionToken={t}
+          currentUserId={session.user_id}
+        />
+      )}
     </main>
   );
 }

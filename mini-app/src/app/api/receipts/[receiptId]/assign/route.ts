@@ -115,5 +115,31 @@ export async function POST(
 
   await sql.transaction(stmts);
 
+  // Tell the bot to edit its original parsed-receipt message so the inline
+  // "Assign items" button is replaced with a summary of who owes what.
+  // Best-effort — failures here mustn't fail the user's save.
+  await notifyBotReceiptAssigned(receiptId).catch((e) => {
+    console.warn("notifyBot failed", String(e));
+  });
+
   return NextResponse.json({ ok: true });
+}
+
+async function notifyBotReceiptAssigned(receiptId: string): Promise<void> {
+  const baseUrl = process.env.BOT_INTERNAL_URL;
+  const secret =
+    process.env.INTERNAL_API_SECRET ?? process.env.MINI_APP_SECRET;
+  if (!baseUrl || !secret) return;
+  const url = `${baseUrl.replace(/\/$/, "")}/internal/receipt-assigned`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Internal-Secret": secret
+    },
+    body: JSON.stringify({ receipt_id: receiptId })
+  });
+  if (!res.ok) {
+    throw new Error(`bot returned ${res.status}: ${await res.text()}`);
+  }
 }

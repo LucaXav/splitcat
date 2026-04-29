@@ -17,6 +17,7 @@ import { handleCallback } from "./handlers/callbacks.js";
 import { handleMention, handleReplyTrigger } from "./handlers/mention.js";
 import { startScheduler } from "./services/scheduler.js";
 import { upsertMember } from "./lib/members.js";
+import { buildAssignedReceiptMessage } from "./lib/receipt-summary.js";
 
 const bot = new Bot(env.TELEGRAM_BOT_TOKEN);
 
@@ -132,10 +133,60 @@ async function main(): Promise<void> {
   // update in the background — Claude Vision photo parses regularly exceed
   // Telegram's 10s webhook timeout, which would otherwise trigger retries
   // and double-process the same update.
+  const internalSecret = env.INTERNAL_API_SECRET ?? env.MINI_APP_SECRET;
+
   const server = http.createServer((req, res) => {
     if (req.method === "GET" && req.url === "/health") {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: true, ts: Date.now() }));
+      return;
+    }
+    // Internal: Mini App calls this after a receipt's split is saved so the
+    // bot can edit its original parsed-receipt message — replacing the
+    // "Assign items" buttons with a per-person summary.
+    if (req.method === "POST" && req.url === "/internal/receipt-assigned") {
+      if (req.headers["x-internal-secret"] !== internalSecret) {
+        res.writeHead(401).end();
+        return;
+      }
+      const chunks: Buffer[] = [];
+      req.on("data", (c: Buffer) => chunks.push(c));
+      req.on("end", async () => {
+        try {
+          const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as {
+            receipt_id?: string;
+          };
+          if (!body.receipt_id) {
+            res.writeHead(400).end();
+            return;
+          }
+          const summary = await buildAssignedReceiptMessage(body.receipt_id);
+          if (!summary) {
+            // No chat_id/message_id (older row) or no assignments — nothing
+            // to edit, but the save itself succeeded so respond 200.
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ ok: true, edited: false }));
+            return;
+          }
+          await bot.api.editMessageText(
+            summary.chat_id,
+            summary.message_id,
+            summary.text,
+            { parse_mode: "Markdown", reply_markup: { inline_keyboard: [] } }
+          );
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: true, edited: true }));
+        } catch (e) {
+          log.error({ err: String(e) }, "/internal/receipt-assigned failed");
+          // Editing the message is best-effort — never bubble back to the
+          // Mini App as a hard failure (the assignment itself is committed).
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: true, edited: false }));
+        }
+      });
+      req.on("error", (e) =>
+        log.error({ err: String(e) }, "/internal/receipt-assigned stream error")
+      );
       return;
     }
     if (req.method === "POST" && req.url === webhookPath) {

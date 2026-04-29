@@ -85,16 +85,19 @@ export async function handlePhoto(ctx: Context): Promise<void> {
         `INSERT INTO receipts (
            group_id, uploaded_by, merchant, receipt_date, currency,
            subtotal, service_charge, tax, tip, total,
-           fx_rate, fx_source, home_currency, photo_file_id, raw_ocr, status
+           fx_rate, fx_source, home_currency, photo_file_id,
+           chat_id, message_id, raw_ocr, status
          ) VALUES (
            $1,$2,$3,$4,$5,
            $6,$7,$8,$9,$10,
-           $11,$12,$13,$14,$15,'pending_assignment'
+           $11,$12,$13,$14,
+           $15,$16,$17,'pending_assignment'
          ) RETURNING id`,
         [
           ctx.chat.id, ctx.from.id, parsed.merchant, parsed.date, parsed.currency,
           parsed.subtotal, parsed.service_charge, parsed.tax, parsed.tip, parsed.total,
-          fx_rate || null, fx_source, home_currency, largest.file_id, JSON.stringify(parsed)
+          fx_rate || null, fx_source, home_currency, largest.file_id,
+          ctx.chat.id, placeholder.message_id, JSON.stringify(parsed)
         ]
       );
       receipt_id = r.rows[0]!.id;

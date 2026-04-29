@@ -19,6 +19,8 @@ export default function AssignmentUI({
   sessionToken: string;
   currentUserId: number;
 }) {
+  const noItems = receipt.line_items.length === 0;
+
   // Map of line_item.id -> Set<user_id>
   const [assignments, setAssignments] = useState<Record<string, Set<number>>>(
     () => {
@@ -29,10 +31,26 @@ export default function AssignmentUI({
       return init;
     }
   );
+
+  // Used only when receipt has no parsed line items: who's chipping in on
+  // the equal split of the total. Defaults to all known members.
+  const [equalSplitMembers, setEqualSplitMembers] = useState<Set<number>>(
+    () => new Set(receipt.members.map((m) => m.user_id))
+  );
+
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
 
   const payer = receipt.members.find((m) => m.user_id === receipt.uploaded_by);
+
+  const toggleEqualSplitMember = (userId: number) => {
+    setEqualSplitMembers((prev) => {
+      const next = new Set(prev);
+      if (next.has(userId)) next.delete(userId);
+      else next.add(userId);
+      return next;
+    });
+  };
 
   useEffect(() => {
     const tg = window.Telegram?.WebApp;
@@ -63,6 +81,13 @@ export default function AssignmentUI({
   };
 
   const livePreview = useMemo(() => {
+    if (noItems) {
+      const out: Record<number, number> = {};
+      if (equalSplitMembers.size === 0) return out;
+      const per = +(receipt.total / equalSplitMembers.size).toFixed(2);
+      for (const uid of equalSplitMembers) out[uid] = per;
+      return out;
+    }
     const assignmentsList = Object.entries(assignments)
       .filter(([, users]) => users.size > 0)
       .map(([line_item_id, users]) => ({
@@ -75,7 +100,7 @@ export default function AssignmentUI({
       total: receipt.total,
       memberSubtotals: subs
     });
-  }, [assignments, receipt]);
+  }, [assignments, equalSplitMembers, noItems, receipt]);
 
   const unassigned = receipt.line_items.filter(
     (li) => (assignments[li.id]?.size ?? 0) === 0
@@ -84,15 +109,25 @@ export default function AssignmentUI({
   const submit = async () => {
     setSubmitting(true);
     try {
-      const payload = {
-        payers: [{ user_id: receipt.uploaded_by, amount_paid: receipt.total }],
-        assignments: Object.entries(assignments)
-          .filter(([, users]) => users.size > 0)
-          .map(([line_item_id, users]) => ({
-            line_item_id,
-            user_ids: Array.from(users)
-          }))
-      };
+      const payload = noItems
+        ? {
+            payers: [
+              { user_id: receipt.uploaded_by, amount_paid: receipt.total }
+            ],
+            assignments: [],
+            equal_split: { user_ids: Array.from(equalSplitMembers) }
+          }
+        : {
+            payers: [
+              { user_id: receipt.uploaded_by, amount_paid: receipt.total }
+            ],
+            assignments: Object.entries(assignments)
+              .filter(([, users]) => users.size > 0)
+              .map(([line_item_id, users]) => ({
+                line_item_id,
+                user_ids: Array.from(users)
+              }))
+          };
       const res = await fetch(`/api/receipts/${receipt.id}/assign`, {
         method: "POST",
         headers: {
@@ -152,7 +187,7 @@ export default function AssignmentUI({
         <div className="font-medium mt-0.5">{payer?.display_name ?? "—"}</div>
       </section>
 
-      <section>
+      {!noItems && <section>
         <h2 className="text-sm font-semibold uppercase tracking-wide text-tg-hint mb-2">
           Items
         </h2>
@@ -206,7 +241,35 @@ export default function AssignmentUI({
             );
           })}
         </div>
-      </section>
+      </section>}
+
+      {noItems && (
+        <section>
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-tg-hint mb-2">
+            Split this bill between
+          </h2>
+          <div className="rounded-xl bg-tg-secondary-bg p-3">
+            <div className="flex flex-wrap gap-1.5">
+              {receipt.members.map((m) => {
+                const selected = equalSplitMembers.has(m.user_id);
+                return (
+                  <button
+                    key={m.user_id}
+                    onClick={() => toggleEqualSplitMember(m.user_id)}
+                    className={`px-2.5 py-1 rounded-full text-xs ${
+                      selected
+                        ? "bg-tg-button text-tg-button-text"
+                        : "bg-tg-bg border border-tg-hint/30 text-tg-text"
+                    }`}
+                  >
+                    {m.display_name}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </section>
+      )}
 
       <section className="mt-6">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-tg-hint mb-2">
@@ -232,15 +295,24 @@ export default function AssignmentUI({
 
       <div className="fixed bottom-0 left-0 right-0 p-4 bg-tg-bg border-t border-tg-hint/20">
         <button
-          disabled={submitting || unassigned.length > 0}
+          disabled={
+            submitting ||
+            (noItems
+              ? equalSplitMembers.size === 0
+              : unassigned.length > 0)
+          }
           onClick={submit}
           className="w-full py-3 rounded-xl bg-tg-button text-tg-button-text font-semibold disabled:opacity-40"
         >
           {submitting
             ? "Saving..."
-            : unassigned.length > 0
-              ? `${unassigned.length} item${unassigned.length > 1 ? "s" : ""} unassigned`
-              : "Save split"}
+            : noItems
+              ? equalSplitMembers.size === 0
+                ? "Pick at least one"
+                : "Save split"
+              : unassigned.length > 0
+                ? `${unassigned.length} item${unassigned.length > 1 ? "s" : ""} unassigned`
+                : "Save split"}
         </button>
       </div>
     </div>

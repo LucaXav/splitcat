@@ -11,6 +11,30 @@ import * as voice from "../lib/voice.js";
 export async function handlePhoto(ctx: Context): Promise<void> {
   if (!ctx.message?.photo || !ctx.from || !ctx.chat) return;
 
+  // Only parse photos that are clearly meant for the bot. Otherwise every
+  // random photo in a friend group burns Vision tokens and clutters the chat.
+  // The auto-discovery middleware in index.ts has already run and upserted
+  // the sender — we just bail before touching Claude.
+  const isPrivate = ctx.chat.type === "private";
+  const isReplyToBot =
+    !!ctx.me && ctx.message.reply_to_message?.from?.id === ctx.me.id;
+  const captionMentionsBot = (() => {
+    const caption = ctx.message.caption;
+    const entities = ctx.message.caption_entities;
+    const botUsername = ctx.me?.username;
+    if (!caption || !entities || !botUsername) return false;
+    const target = `@${botUsername.toLowerCase()}`;
+    return entities.some(
+      (e) =>
+        e.type === "mention" &&
+        caption.slice(e.offset, e.offset + e.length).toLowerCase() === target
+    );
+  })();
+
+  if (!isPrivate && !isReplyToBot && !captionMentionsBot) {
+    return;
+  }
+
   // Largest size is the last one Telegram returns
   const largest = ctx.message.photo[ctx.message.photo.length - 1]!;
 
@@ -116,16 +140,25 @@ export async function handlePhoto(ctx: Context): Promise<void> {
     const lowConfNote =
       parsed.confidence === "low" ? `\n⚠️ Low confidence — double-check the items. ${parsed.notes ?? ""}` : "";
 
-    const text = `🧾 *${escape(parsed.merchant ?? "Receipt")}*\n${parsed.total.toFixed(2)} ${parsed.currency}${fxNote}\nPaid by ${escape(ctx.from.first_name ?? "you")} · ${parsed.line_items.length} items.\n\nTap below to assign who had what 👇${lowConfNote}`;
+    const noItems = parsed.line_items.length === 0;
+
+    const itemsLine = noItems
+      ? escape(voice.receiptNoItems())
+      : `Paid by ${escape(ctx.from.first_name ?? "you")} · ${parsed.line_items.length} items.\n\nTap below to assign who had what 👇`;
+
+    const text = `🧾 *${escape(parsed.merchant ?? "Receipt")}*\n${parsed.total.toFixed(2)} ${parsed.currency}${fxNote}\n${itemsLine}${lowConfNote}`;
+
+    const buttonText = noItems ? "🐾 Split bill" : "🐾 Assign items";
+    const inline_keyboard = noItems
+      ? [[{ text: buttonText, url: miniAppUrl }]]
+      : [
+          [{ text: buttonText, url: miniAppUrl }],
+          [{ text: "Split equally", callback_data: `split_equal:${receipt_id}` }]
+        ];
 
     await ctx.api.editMessageText(ctx.chat.id, placeholder.message_id, text, {
       parse_mode: "Markdown",
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: "🐾 Assign items", url: miniAppUrl }],
-          [{ text: "Split equally", callback_data: `split_equal:${receipt_id}` }]
-        ]
-      }
+      reply_markup: { inline_keyboard }
     });
   } catch (e) {
     log.error({ err: String(e) }, "Photo handling failed");

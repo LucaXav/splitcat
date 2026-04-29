@@ -31,7 +31,10 @@ export async function POST(
   }
 
   const body = (await req.json()) as AssignmentPayload;
-  if (!body?.assignments?.length) {
+  const hasAssignments = (body?.assignments?.length ?? 0) > 0;
+  const equalSplitUsers = body?.equal_split?.user_ids ?? [];
+  const hasEqualSplit = equalSplitUsers.length > 0;
+  if (!hasAssignments && !hasEqualSplit) {
     return NextResponse.json({ error: "no assignments" }, { status: 400 });
   }
 
@@ -41,6 +44,37 @@ export async function POST(
          WHERE line_item_id IN (SELECT id FROM line_items WHERE receipt_id = ${receiptId})`,
     sql`DELETE FROM receipt_payers WHERE receipt_id = ${receiptId}`
   ];
+
+  // Card-slip path: receipt has no parsed line items, so synthesise one with
+  // the receipt's total and split it equally among the chosen users. The rest
+  // of the system (balances, nudges) keeps treating it as a normal line item.
+  if (hasEqualSplit) {
+    const { rows } = await db.query<{ total: string }>(
+      `SELECT total::text FROM receipts WHERE id = $1`,
+      [receiptId]
+    );
+    if (!rows.length) {
+      return NextResponse.json({ error: "receipt not found" }, { status: 404 });
+    }
+    const total = Number(rows[0].total);
+    const syntheticItemId = crypto.randomUUID();
+
+    // Drop any prior synthetic items so re-submits don't pile up.
+    stmts.push(
+      sql`DELETE FROM line_items WHERE receipt_id = ${receiptId}`
+    );
+    stmts.push(sql`
+      INSERT INTO line_items (id, receipt_id, position, description, quantity, unit_price, line_total)
+      VALUES (${syntheticItemId}, ${receiptId}, 1, 'Total bill', 1, ${total}, ${total})
+    `);
+    for (const uid of equalSplitUsers) {
+      stmts.push(sql`
+        INSERT INTO line_item_assignments (line_item_id, user_id, share)
+        VALUES (${syntheticItemId}, ${uid}, 1)
+        ON CONFLICT (line_item_id, user_id) DO UPDATE SET share = 1
+      `);
+    }
+  }
 
   // Re-insert assignments as equal-share rows (share = 1 each, division
   // happens at query time in the balances view).

@@ -34,6 +34,13 @@ export const receiptParsing = () =>
     "📸 reading... this better not be another sad desk salad"
   ]);
 
+export const receiptNoItems = () =>
+  pick([
+    "📸 No itemization on this one — looks like a card slip. Tap below to split the total.",
+    "📸 Just a total on this slip, no itemization. Pick who's chipping in below.",
+    "📸 Card slip, no line items. Split the total between whoever was there 👇"
+  ]);
+
 export const receiptFailed = () =>
   pick([
     "😿 I couldn't read that receipt. Try a clearer photo with the whole bill in frame?",

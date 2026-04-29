@@ -39,4 +39,8 @@ export type AssignmentPayload = {
     line_item_id: string;
     user_ids: number[]; // equal split among these
   }>;
+  // Used when the receipt was parsed with zero line items (e.g. card slip).
+  // The API synthesises a single line item for the receipt total and assigns
+  // it equally to these users.
+  equal_split?: { user_ids: number[] };
 };

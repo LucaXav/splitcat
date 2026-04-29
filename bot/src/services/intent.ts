@@ -22,6 +22,7 @@ export type Intent =
   | { kind: "mark_debt_cleared"; debtor_user_id: number; receipt_hint: string | null }
   | { kind: "fun_message"; flavor: FunFlavor; recipient_user_id: number }
   | { kind: "smalltalk"; reply: string }
+  | { kind: "flattery"; reply: string }
   | { kind: "unknown" };
 
 const INTENT_KINDS = [
@@ -34,6 +35,7 @@ const INTENT_KINDS = [
   "mark_debt_cleared",
   "fun_message",
   "smalltalk",
+  "flattery",
   "unknown"
 ] as const;
 
@@ -56,6 +58,18 @@ Intent meanings:
     recipient_user_id MUST be a member of the group.
 - smalltalk — user said hi, thanks, made a joke. "reply" should be a short
   cat-themed line under 15 words.
+- flattery — the user is excessively praising / complimenting / professing love
+  or fandom AT the bot itself. Examples that DO trigger: "you're the best",
+  "good kitty", "splitcat I love you", "best bot ever", "amazing work",
+  "you're amazing", "marry me splitcat", "10/10 cat", "splitcat is my hero".
+  Be CONSERVATIVE — these do NOT trigger flattery, return smalltalk instead:
+    • plain "thanks" / "thank you" / "ty"
+    • thanking the bot for a specific action ("thanks for parsing the receipt",
+      "thanks for the reminder", "ty for splitting that")
+    • generic happy / cheerful messages not aimed at the bot
+    • short acknowledgements ("nice", "cool", "ok")
+  Trigger ONLY when the message is genuinely buttering up the bot.
+  "reply" should be a short cat-themed line under 15 words — same shape as smalltalk.
 - unknown — can't tell, or any guardrail below trips.
 
 Rules:
@@ -114,7 +128,8 @@ const INTENT_TOOL: Anthropic.Messages.Tool = {
       recipient_user_id: { type: "number", description: "Required when kind=fun_message." },
       reply: {
         type: "string",
-        description: "Short cat-themed reply (<15 words). Required when kind=smalltalk."
+        description:
+          "Short cat-themed reply (<15 words). Required when kind=smalltalk or kind=flattery."
       }
     },
     required: ["kind"]

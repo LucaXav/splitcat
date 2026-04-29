@@ -1,6 +1,7 @@
 import type { Context } from "grammy";
 import { db } from "../lib/db.js";
 import { log } from "../lib/log.js";
+import { env } from "../env.js";
 import { parseIntent, type Intent } from "../services/intent.js";
 import { generateSmalltalk, generateFunMessage } from "../services/claude.js";
 import * as voice from "../lib/voice.js";
@@ -115,6 +116,10 @@ async function dispatchIntent(ctx: Context, intent: Intent): Promise<void> {
 
     case "fun_message":
       await sendFunMessage(ctx, intent);
+      return;
+
+    case "flattery":
+      await sendFlatteryReply(ctx, intent);
       return;
 
     case "smalltalk":
@@ -246,6 +251,28 @@ async function markDebtCleared(
   const debtorName = nameRows[0]?.display_name ?? "they";
 
   await ctx.reply(voice.debtCleared(debtorName, `${amount.toFixed(2)} ${ccy}`));
+}
+
+async function sendFlatteryReply(
+  ctx: Context,
+  intent: Extract<Intent, { kind: "flattery" }>
+): Promise<void> {
+  if (!ctx.chat) return;
+
+  // Optional kiss-sticker preface. Failure must not block the text reply.
+  const fileId = env.FLATTERY_STICKER_FILE_ID;
+  if (fileId) {
+    try {
+      await ctx.api.sendSticker(ctx.chat.id, fileId);
+    } catch (err) {
+      log.warn(
+        { err: String(err), fileId },
+        "failed to send flattery sticker, continuing with text"
+      );
+    }
+  }
+
+  await ctx.reply(intent.reply);
 }
 
 async function sendFunMessage(

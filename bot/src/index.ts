@@ -113,6 +113,11 @@ bot.catch((err) => {
 });
 
 async function main(): Promise<void> {
+  // Fetch botInfo upfront. Required because we bypass webhookCallback (which
+  // would init lazily on first update) and call bot.handleUpdate directly —
+  // grammY needs botInfo populated before handling any update.
+  await bot.init();
+
   // Make sure Telegram knows where to deliver updates
   const webhookPath = "/telegram-webhook";
   const webhookUrl = `${env.PUBLIC_URL.replace(/\/$/, "")}${webhookPath}`;

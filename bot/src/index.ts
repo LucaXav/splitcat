@@ -1,7 +1,8 @@
-import { Bot, webhookCallback } from "grammy";
+import { Bot } from "grammy";
 import http from "node:http";
 import { env } from "./env.js";
 import { log } from "./lib/log.js";
+import { isDuplicate } from "./lib/dedup.js";
 import { handlePhoto } from "./handlers/photo.js";
 import {
   handleStart,
@@ -122,23 +123,52 @@ async function main(): Promise<void> {
   });
   log.info({ webhookUrl }, "Webhook registered with Telegram");
 
-  // HTTP server
-  const handle = webhookCallback(bot, "http", {
-    secretToken: env.TELEGRAM_WEBHOOK_SECRET
-  });
-  const server = http.createServer(async (req, res) => {
+  // HTTP server. We ACK Telegram webhooks immediately (200) and process the
+  // update in the background — Claude Vision photo parses regularly exceed
+  // Telegram's 10s webhook timeout, which would otherwise trigger retries
+  // and double-process the same update.
+  const server = http.createServer((req, res) => {
     if (req.method === "GET" && req.url === "/health") {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: true, ts: Date.now() }));
       return;
     }
     if (req.method === "POST" && req.url === webhookPath) {
-      try {
-        await handle(req, res);
-      } catch (e) {
-        log.error({ err: String(e) }, "webhook handler error");
-        res.writeHead(500).end();
+      if (
+        req.headers["x-telegram-bot-api-secret-token"] !==
+        env.TELEGRAM_WEBHOOK_SECRET
+      ) {
+        res.writeHead(401).end();
+        return;
       }
+
+      const chunks: Buffer[] = [];
+      req.on("data", (chunk: Buffer) => chunks.push(chunk));
+      req.on("end", () => {
+        // Ack first — Telegram only cares about the 200, not the body.
+        res.writeHead(200).end();
+
+        let update: any;
+        try {
+          update = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+        } catch (e) {
+          log.error({ err: String(e) }, "webhook body parse failed");
+          return;
+        }
+
+        const updateId = update?.update_id;
+        if (typeof updateId === "number" && isDuplicate(updateId)) {
+          log.debug({ updateId }, "duplicate update ignored");
+          return;
+        }
+
+        void bot.handleUpdate(update).catch((err) => {
+          log.error({ err: String(err), updateId }, "background update handler failed");
+        });
+      });
+      req.on("error", (e) => {
+        log.error({ err: String(e) }, "webhook request stream error");
+      });
       return;
     }
     res.writeHead(404).end();
